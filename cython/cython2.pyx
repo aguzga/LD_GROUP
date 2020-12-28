@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#cython: language_level=3, boundscheck=False, wraparound = False
+#cython: language_level=3, boundscheck=False, wraparound = False, nonecheck = True, cdivision = True
 
 
 # In[1]:
@@ -67,19 +67,19 @@ def create_ring_graph(N, k):
 # In[8]:
 
 
-cpdef float simulate_game(G, int k, int rounds, float A, float beta, float eps, int b, int c):
-    cdef int nodes = len(list(G.nodes))
-    cdef numpy.ndarray[numpy.int_t, ndim=1] actions
-    cdef numpy.ndarray[numpy.float_t, ndim=1] probas
-    cdef numpy.ndarray[numpy.float_t, ndim=1] counts
-    cdef numpy.ndarray[numpy.float_t, ndim=1] payoffs
-    cdef numpy.ndarray[numpy.int_t, ndim=2] neighbours
-    cdef numpy.ndarray[numpy.int_t, ndim=2] payoff_mat
-
-    cdef numpy.ndarray[numpy.int_t, ndim=1] n_def
-    cdef numpy.ndarray[numpy.int_t, ndim=1] n_coop
-    cdef numpy.ndarray[numpy.uint8_t, ndim=1] neg
-    cdef numpy.ndarray[numpy.float_t, ndim=1] stim
+cdef void simulate_game(G, int k, int rounds, float A, float beta, float eps, int nodes,
+                          numpy.ndarray[numpy.int_t, ndim=2] neighbours,
+                          numpy.ndarray[numpy.int_t, ndim=2] payoff_mat,
+                          numpy.ndarray[numpy.float_t, ndim=1] probas,
+                          numpy.ndarray[numpy.int_t, ndim=1] actions,
+                          numpy.ndarray[numpy.float_t, ndim=1] counts,
+                          numpy.ndarray[numpy.float_t, ndim=1] payoffs,
+                          numpy.ndarray[numpy.float_t, ndim=1] assortment,
+                          numpy.ndarray[numpy.int_t, ndim=1] n_def,
+                          numpy.ndarray[numpy.int_t, ndim=1] n_coop,
+                          numpy.ndarray[numpy.uint8_t, ndim=1] neg,
+                          numpy.ndarray[numpy.float_t, ndim=1] stim,
+                          numpy.ndarray[numpy.float_t, ndim=1] res):
 
     cdef numpy.ndarray[numpy.uint8_t, ndim=1] m_def
     cdef numpy.ndarray[numpy.uint8_t, ndim=1] m_coop
@@ -91,29 +91,22 @@ cpdef float simulate_game(G, int k, int rounds, float A, float beta, float eps, 
     cdef numpy.ndarray[numpy.uint8_t, ndim=1] idx3
     cdef numpy.ndarray[numpy.uint8_t, ndim=1] idx4
 
-    probas = np.array([0.8 for _ in range(nodes)])
-    counts = np.zeros(rounds)
-    assortment = np.zeros(rounds)
 
-    payoff_mat = np.array([[b - c, -c],
-                           [b, 0]])
+
+
     cdef float new_p
     cdef int _k = k
     cdef Py_ssize_t n
-    nodes_list = list(G.nodes)
-    neighbours = np.array([list(G.neighbors(node)) for node in range(nodes)])
-    cdef Py_ssize_t r = 0
+
+    cdef Py_ssize_t r
     cdef Py_ssize_t _rounds = 50
-    cdef Py_ssize_t node = 0
-    cdef Py_ssize_t neighbour = 0
+    cdef Py_ssize_t node
     cdef int countC
     cdef int countD
+    cdef int assort_rounds = 25
     for r in range(_rounds):
         payoffs = np.zeros(nodes)
         actions = np.random.binomial(1, p=(1 - probas))
-        countC = 0
-        countD = 0
-
         n_def = np.count_nonzero(actions[neighbours], axis=1)
         n_coop = k - n_def
 
@@ -147,12 +140,16 @@ cpdef float simulate_game(G, int k, int rounds, float A, float beta, float eps, 
 
         counts[r] = nodes - np.count_nonzero(actions)
         assortment[r] = (countC - countD) / (nodes * k)
-    assort = np.sum(assortment) / rounds
+    assort = np.sum(assortment) / assort_rounds
     counts = counts / nodes
-    return counts[rounds - 1]
+
+    res[0] = counts[rounds-1]
+    res[1] = assort
+
+    #return res
 
 
-def run_test():
+cpdef run_test():
     cdef int N = 100
     cdef int k = 6
     G = create_ring_graph(N, k)
@@ -161,6 +158,7 @@ def run_test():
     cdef float eps = 0.05
     cdef int b = 6
     cdef int c = 1
+    cdef int nodes = len(list(G.nodes))
 
     startTime = time()
     cdef numpy.ndarray[numpy.float_t, ndim=1] A_values
@@ -168,15 +166,53 @@ def run_test():
     A_values = np.linspace(-1, 5, num=100)
     eps_values = np.linspace(0, 0.5, num=100)
     cdef numpy.ndarray[numpy.float_t, ndim=2] heatmap
+    cdef numpy.ndarray[numpy.float_t, ndim=2] assort
     heatmap = np.zeros((100, 100))
+    assort = np.zeros((100, 100))
+
+    cdef numpy.ndarray[numpy.int_t, ndim=2] payoff_mat
+    cdef numpy.ndarray[numpy.float_t, ndim=1] probas
+    cdef numpy.ndarray[numpy.int_t, ndim=1] actions
+    cdef numpy.ndarray[numpy.float_t, ndim=1] counts
+    cdef numpy.ndarray[numpy.float_t, ndim=1] payoffs
+    cdef numpy.ndarray[numpy.int_t, ndim=2] neighbours
+    cdef numpy.ndarray[numpy.float_t, ndim=1] assortment
+
+    cdef numpy.ndarray[numpy.int_t, ndim=1] n_def
+    cdef numpy.ndarray[numpy.int_t, ndim=1] n_coop
+    cdef numpy.ndarray[numpy.uint8_t, ndim=1] neg
+    cdef numpy.ndarray[numpy.float_t, ndim=1] stim
+
+    cdef numpy.ndarray[numpy.float_t, ndim=1] res
+
+    res = np.zeros(2)
+    payoff_mat = np.array([[b - c, -c],
+                           [b, 0]])
+    n_coop = np.array([0 for _ in range(nodes)])
+    n_def = np.array([0 for _ in range(nodes)])
+    neg = np.array([False for _ in range(nodes)])
+    stim = np.zeros(nodes)
+    payoffs = np.zeros(nodes)
+    neighbours = np.array([list(G.neighbors(node)) for node in range(nodes)])
 
     cdef Py_ssize_t max_range = 100
+    cdef Py_ssize_t rounds = 50
 
     cdef Py_ssize_t a_i = 0
     cdef Py_ssize_t eps_i = 0
     for a_i in range(max_range):
         for eps_i in range(max_range):
-            heatmap[eps_i][a_i] = simulate_game(G, k, 50, A_values[a_i], beta, eps_values[eps_i], b, c)
+            counts = np.zeros(rounds)
+            assortment = np.zeros(rounds)
+            actions = np.array([0 for _ in range(nodes)])
+            probas = np.array([0.8 for _ in range(nodes)])
+            simulate_game(G, k, rounds, A_values[a_i], beta, eps_values[eps_i],
+                                nodes, neighbours, payoff_mat, probas, actions,
+                                counts, payoffs, assortment, n_def, n_coop, neg, stim, res)
+            heatmap[eps_i][a_i] += res[0]
+            assort[eps_i][a_i] += res[1]
+
+    print(np.sum(heatmap))
 
     endTime = time()
     print("\nSimulating took {} seconds".format(round(endTime - startTime)))
